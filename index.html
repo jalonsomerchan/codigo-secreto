@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+  <title>Ahorcado Multijugador</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { DEFAULT: '#6366f1', dark: '#4338ca', light: '#a5b4fc' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .screen { display: none; opacity: 0; transform: translateY(10px); transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+    .screen.active { display: flex; flex-direction: column; flex: 1; overflow-y: auto; opacity: 1; transform: translateY(0); }
+    
+    @keyframes pop { 0%{transform:scale(0.8);opacity:0} 70%{transform:scale(1.05)} 100%{transform:scale(1);opacity:1} }
+    .pop { animation: pop .3s ease forwards; }
+    
+    @keyframes toast-in { from{opacity:0;transform:translate(-50%,-12px)} to{opacity:1;transform:translate(-50%,0)} }
+    .animate-toast { animation: toast-in .2s ease forwards; }
+
+    @keyframes pulse-indigo { 0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); } 50% { box-shadow: 0 0 0 10px rgba(99, 102, 241, 0); } }
+    .pulse-active { animation: pulse-indigo 2s infinite; }
+
+    @keyframes slide-up { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .animate-slide-up { animation: slide-up 0.5s ease out forwards; }
+
+    .letter-slot { transition: all 0.3s ease; border-bottom: 3px solid #374151; }
+    .letter-slot.filled { border-bottom-color: #6366f1; transform: translateY(-2px); }
+    
+    .key-btn { transition: all 0.1s ease; }
+    .key-btn:active { transform: scale(0.9); }
+    
+    /* Scrollbar thin */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
+  </style>
+</head>
+<body class="h-full bg-gray-950 text-white font-sans select-none">
+
+<main id="app" class="h-full max-w-4xl mx-auto flex flex-col p-4">
+  <!-- Pantalla de Login -->
+  <section id="screen-login" class="screen active justify-center items-center">
+    <div class="bg-gray-900 p-8 rounded-2xl border border-gray-800 shadow-2xl w-full max-w-sm pop">
+      <h1 class="text-4xl font-black mb-2 text-center bg-gradient-to-r from-brand to-brand-light bg-clip-text text-transparent">CÓDIGO SECRETO</h1>
+      <p class="text-gray-400 text-center mb-8">Ingresa tu nombre para comenzar</p>
+      
+      <div class="space-y-4">
+        <input type="text" id="input-username" placeholder="Nombre de usuario" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand text-lg" maxlength="15">
+        <button id="btn-login" class="w-full bg-brand hover:bg-brand-dark text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-brand/20">Entrar</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pantalla de Lobby -->
+  <section id="screen-lobby" class="screen justify-center items-center">
+    <div class="w-full max-w-md space-y-6 pop">
+      <div class="flex justify-between items-center px-2">
+        <div class="text-sm font-bold text-gray-500 uppercase tracking-widest">Hola, <span id="display-username" class="text-brand">---</span></div>
+        <button id="btn-logout" class="text-xs text-red-500 hover:underline">Cambiar nombre</button>
+      </div>
+      <div class="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl text-center">
+        <h2 class="text-2xl font-bold mb-4">¿Qué quieres hacer?</h2>
+        <div class="grid grid-cols-1 gap-4">
+          <button id="btn-create-room" class="bg-gray-800 hover:bg-gray-700 p-4 rounded-xl border border-gray-700 flex items-center justify-between group transition-all">
+            <div class="text-left">
+              <div class="font-bold text-lg">Crear Sala</div>
+              <div class="text-sm text-gray-400">Tú serás el Guía de Espías</div>
+            </div>
+            <span class="text-2xl group-hover:translate-x-1 transition-transform">→</span>
+          </button>
+          
+          <div class="relative py-2">
+            <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-800"></div></div>
+            <div class="relative flex justify-center text-xs uppercase"><span class="bg-gray-950 px-2 text-gray-500 font-bold">O únete a una</span></div>
+          </div>
+
+          <div class="flex gap-2">
+            <input type="text" id="input-room-code" placeholder="CÓDIGO" class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 focus:outline-none uppercase font-mono text-center tracking-widest">
+            <button id="btn-join-room" class="bg-brand hover:bg-brand-dark px-6 rounded-xl font-bold">Unirse</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pantalla de Sala de Espera -->
+  <section id="screen-waiting" class="screen">
+    <div class="flex-1 flex flex-col p-4 space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-2xl font-black">SALA: <span id="display-room-code" class="text-brand">-----</span></h2>
+          <p class="text-gray-400">Esperando jugadores...</p>
+        </div>
+        <button id="btn-share" class="p-2 bg-gray-800 rounded-lg hover:bg-gray-700">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+        </button>
+      </div>
+
+      <div class="bg-gray-900 rounded-2xl border border-gray-800 p-4 flex-1 overflow-y-auto">
+        <h3 class="text-sm font-bold text-gray-500 uppercase mb-4 tracking-wider">Jugadores en línea</h3>
+        <ul id="list-players" class="space-y-2">
+          <!-- Jugadores aquí -->
+        </ul>
+      </div>
+
+      <div id="admin-controls" class="hidden space-y-4">
+        <div class="bg-gray-900 p-4 rounded-xl border border-gray-800">
+          <label class="block text-sm font-bold text-gray-500 uppercase mb-2">Configuración</label>
+          <div class="flex items-center justify-between">
+            <span>Dificultad</span>
+            <select id="select-difficulty" class="bg-gray-800 rounded-lg px-3 py-1 border border-gray-700">
+              <option value="easy">Fácil</option>
+              <option value="normal" selected>Normal</option>
+              <option value="hard">Difícil</option>
+            </select>
+          </div>
+        </div>
+        <button id="btn-start-game" class="w-full bg-green-600 hover:bg-green-700 text-white font-black py-4 rounded-xl shadow-lg transition-all transform hover:scale-[1.02] active:scale-[0.98]">
+          ¡COMENZAR JUEGO!
+        </button>
+      </div>
+
+      <div id="player-waiting-msg" class="text-center p-4 bg-gray-900 rounded-xl border border-gray-800 text-gray-400 italic">
+        Esperando a que el administrador inicie la partida...
+      </div>
+    </div>
+  </section>
+
+  <!-- Pantalla de Juego -->
+  <section id="screen-game" class="screen">
+    <div class="flex-1 flex flex-col h-full">
+      <!-- Header del juego -->
+      <div class="flex items-center justify-between p-2 mb-2">
+        <div class="flex gap-4">
+          <div class="bg-red-900/50 border border-red-500 px-3 py-1 rounded-lg text-center min-w-[60px]">
+            <div class="text-[10px] uppercase font-bold text-red-300">Rojos</div>
+            <div id="score-red" class="text-xl font-black">0</div>
+          </div>
+          <div class="bg-blue-900/50 border border-blue-500 px-3 py-1 rounded-lg text-center min-w-[60px]">
+            <div class="text-[10px] uppercase font-bold text-blue-300">Azules</div>
+            <div id="score-blue" class="text-xl font-black">0</div>
+          </div>
+        </div>
+        
+        <div class="text-center">
+          <div id="turn-indicator" class="px-4 py-1 rounded-full text-xs font-black uppercase tracking-widest border border-gray-700 bg-gray-800">
+            TURNO ROJO
+          </div>
+          <div id="clue-display" class="text-lg font-bold mt-1 text-brand hidden">
+            PISTA: <span id="current-clue">---</span> <span id="current-count" class="bg-brand text-white px-2 rounded ml-1">0</span>
+          </div>
+        </div>
+
+        <button id="btn-menu" class="p-2 text-gray-400">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" /></svg>
+        </button>
+      </div>
+
+      <!-- Tablero -->
+      <div id="board" class="grid grid-cols-5 gap-2 p-2 flex-1 items-center">
+        <!-- Las 25 palabras se generarán aquí -->
+      </div>
+
+      <!-- Controles de Guía -->
+      <div id="spymaster-controls" class="hidden p-4 bg-gray-900 border-t border-gray-800 pop">
+        <div class="flex gap-2">
+          <input type="text" id="input-clue-word" placeholder="PALABRA PISTA" class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2 focus:outline-none uppercase">
+          <input type="number" id="input-clue-count" min="0" max="9" value="1" class="w-16 bg-gray-800 border border-gray-700 rounded-xl px-2 py-2 text-center">
+          <button id="btn-send-clue" class="bg-brand px-4 rounded-xl font-bold">Enviar</button>
+        </div>
+        <p class="text-[10px] text-gray-500 mt-2 text-center uppercase tracking-tighter">Eres el Guía. No puedes decir nada más que la pista.</p>
+      </div>
+
+      <!-- Controles de Agente -->
+      <div id="agent-controls" class="hidden p-4 bg-gray-900 border-t border-gray-800 text-center">
+        <button id="btn-end-turn" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white font-bold py-3 px-8 rounded-xl transition-all">
+          Terminar Turno
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Modal Resultado -->
+  <div id="modal-result" class="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-6 hidden">
+    <div class="bg-gray-900 border border-gray-800 p-8 rounded-3xl max-w-sm w-full text-center pop">
+      <div id="winner-icon" class="text-6xl mb-4">🏆</div>
+      <h2 id="winner-title" class="text-3xl font-black mb-2">¡VICTORIA ROJA!</h2>
+      <p id="winner-msg" class="text-gray-400 mb-8">Han encontrado a todos sus agentes.</p>
+      <button id="btn-back-lobby" class="w-full bg-brand py-4 rounded-xl font-black text-lg">VOLVER AL LOBBY</button>
+    </div>
+  </div>
+
+</main>
+
+<!-- Scripts -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="js/game.js" type="module"></script>
+</body>
+</html>

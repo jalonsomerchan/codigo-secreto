@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:ittysockets.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:esm.sh)",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}
