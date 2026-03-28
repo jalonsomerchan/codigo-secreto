@@ -265,7 +265,13 @@ class JuegoCodigoSecreto {
     });
 
     this.socket.on('turn_switch', (data) => {
-      this.switchTurnLocal(data.newTurn);
+      if (data.phase) {
+        this.switchPhaseToClue();
+        this.renderBoard();
+        this.updateGameState(this.room.game_state);
+      } else {
+        this.switchTurnLocal(data.newTurn);
+      }
     });
   }
 
@@ -302,6 +308,24 @@ class JuegoCodigoSecreto {
     this.assignTypes(grid, firstTurn);
 
     const twoPlayerMode = document.getElementById('config-2player')?.checked || false;
+    let spymasterId = null, playerRoles = null;
+    const players = this.room.players || this.room.participants || [];
+
+    if (twoPlayerMode) {
+      const other = players.find(p => p.user_id !== this.user.id);
+      spymasterId = Math.random() > 0.5 ? this.user.id : (other?.user_id || this.user.id);
+      this.assignTypes2P(grid);
+    } else {
+      // Equipos y roles aleatorios
+      const shuffled = [...players].sort(() => Math.random() - 0.5);
+      const mid = Math.ceil(shuffled.length / 2);
+      playerRoles = {};
+      shuffled.forEach((p, i) => {
+        const team = i < mid ? 'red' : 'blue';
+        const isSpymaster = (i === 0) || (i === mid); // primero de cada equipo es guía
+        playerRoles[p.user_id] = { team, role: isSpymaster ? 'guia' : 'agent' };
+      });
+    }
     const gameState = {
       grid,
       turn: firstTurn,
@@ -309,6 +333,8 @@ class JuegoCodigoSecreto {
       clue: null,
       timePerTurn,
       twoPlayerMode,
+      spymasterId,
+      playerRoles,
       phase: 'clue',
       status: 'playing'
     };
@@ -338,6 +364,16 @@ class JuegoCodigoSecreto {
     }));
   }
 
+  assignTypes2P(grid) {
+    // Cooperativo: 9 palabras objetivo (red) + 15 civiles + 1 asesino
+    const types = [
+      ...Array(9).fill('red'),
+      ...Array(15).fill('civil'),
+      'assassin'
+    ].sort(() => Math.random() - 0.5);
+    grid.forEach((cell, i) => cell.type = types[i]);
+  }
+
   assignTypes(grid, firstTurn) {
     const types = [];
     const secondTurn = firstTurn === 'red' ? 'blue' : 'red';
@@ -351,12 +387,19 @@ class JuegoCodigoSecreto {
   }
 
   startGame() {
+    const state = this.room.game_state;
+    // Asignar equipo y rol desde el estado
+    if (!state.twoPlayerMode && state.playerRoles?.[this.user.id]) {
+      const me = state.playerRoles[this.user.id];
+      this._myTeam = me.team;
+      this.role = me.role;
+    }
     this.showScreen('game');
     this.renderBoard();
-    this.updateGameState(this.room.game_state);
+    this.updateGameState(state);
   }
 
-  get myTeam() { return this.isHost ? 'red' : 'blue'; }
+  get myTeam() { return this._myTeam || (this.isHost ? 'red' : 'blue'); }
 
   renderBoard() {
     const state = this.room.game_state;
@@ -366,10 +409,9 @@ class JuegoCodigoSecreto {
       btn.className = `word-card rounded-lg p-2 flex items-center justify-center text-center font-bold uppercase transition-all shadow-md border-2 border-transparent bg-gray-800 hover:scale-[1.02] active:scale-95`;
       btn.textContent = cell.word;
 
-      // En modo 2 jugadores: cada jugador ve solo sus propias palabras (sin revelar)
-      // En modo normal: el guía ve todas
+      const isSpy2P = state.twoPlayerMode && state.spymasterId === this.user.id;
       const showAsGuide = state.twoPlayerMode
-        ? cell.type === this.myTeam
+        ? (isSpy2P && cell.type === 'red')   // espía ve solo las palabras objetivo
         : this.role === 'guia';
 
       if (cell.revealed || showAsGuide) {
@@ -383,14 +425,14 @@ class JuegoCodigoSecreto {
 
   applyCellColor(el, type, revealed, asHint = false) {
     const colors = {
-      red: 'bg-red-600 text-white border-red-400',
-      blue: 'bg-blue-600 text-white border-blue-400',
-      civil: 'bg-yellow-100 text-gray-800 border-yellow-200',
-      assassin: 'bg-gray-900 text-white border-red-900'
+      red:      'bg-red-600 text-white border-red-400',
+      blue:     'bg-blue-600 text-white border-blue-400',
+      civil:    'bg-yellow-100 text-gray-800 border-yellow-200',
+      assassin: 'bg-black text-red-400 border-red-600',
     };
+    if (type === 'assassin') el.textContent = '☠ ' + el.textContent.replace('☠ ', '');
     if (asHint) {
-      // Muestra el color semi-transparente (modo guía o propio equipo en 2p)
-      el.classList.add('opacity-50', 'border-dashed');
+      el.classList.add('opacity-60', 'border-dashed');
       el.classList.add(...colors[type].split(' '));
     } else if (revealed) {
       el.classList.remove('bg-gray-800', 'text-white');
@@ -402,38 +444,50 @@ class JuegoCodigoSecreto {
 
   updateGameState(state) {
     this.room.game_state = state;
-    this.displays.scoreRed.textContent = state.grid.filter(c => c.type === 'red' && c.revealed).length;
-    this.displays.scoreBlue.textContent = state.grid.filter(c => c.type === 'blue' && c.revealed).length;
-    
-    this.displays.turnIndicator.textContent = `TURNO ${state.turn.toUpperCase()}`;
-    this.displays.turnIndicator.className = `px-4 py-1 rounded-full text-xs font-black uppercase tracking-widest border ${state.turn === 'red' ? 'border-red-500 bg-red-900/30 text-red-400' : 'border-blue-500 bg-blue-900/30 text-blue-400'}`;
-
-    this.updateControls();
+    this.updateControls(); // updateControls maneja HUD según modo
   }
 
   updateControls() {
     const state = this.room.game_state;
-    const isMyTurn = state.turn === this.myTeam;
     let showSpymaster, showAgent;
 
     if (state.twoPlayerMode) {
-      showSpymaster = isMyTurn && state.phase === 'clue' && !state.clue;
-      showAgent     = isMyTurn && state.phase === 'guess';
+      const isSpy = state.spymasterId === this.user.id;
+      showSpymaster = isSpy && state.phase === 'clue' && !state.clue;
+      showAgent     = !isSpy && state.phase === 'guess';
+
+      // HUD 2P
+      document.getElementById('hud-2p').classList.remove('hidden');
+      document.getElementById('hud-teams').classList.add('hidden');
+      const myRole = isSpy ? 'ESPÍA' : 'AGENTE';
+      document.getElementById('role-badge').textContent = myRole;
+      document.getElementById('role-badge').className = `px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${isSpy ? 'border-brand bg-brand/20 text-brand-light' : 'border-green-600 bg-green-900/20 text-green-400'}`;
+      const phaseText = state.phase === 'clue' ? 'ESPÍA · Dando pista' : 'AGENTE · Adivinando';
+      document.getElementById('turn-indicator-2p').textContent = phaseText;
+      const found = state.grid.filter(c => c.type === 'red' && c.revealed).length;
+      document.getElementById('score-2p').textContent = found;
     } else {
+      const isMyTurn = state.turn === this.myTeam;
       const isGuia = this.role === 'guia';
       showSpymaster = isGuia && isMyTurn && !state.clue;
       showAgent     = !isGuia && isMyTurn && !!state.clue;
+
+      document.getElementById('hud-teams').classList.remove('hidden');
+      document.getElementById('hud-2p').classList.add('hidden');
+      this.displays.scoreRed.textContent = state.grid.filter(c => c.type === 'red' && c.revealed).length;
+      this.displays.scoreBlue.textContent = state.grid.filter(c => c.type === 'blue' && c.revealed).length;
+      this.displays.turnIndicator.textContent = state.turn.toUpperCase();
+      this.displays.turnIndicator.className = `px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${state.turn === 'red' ? 'border-red-500 bg-red-900/30 text-red-400' : 'border-blue-500 bg-blue-900/30 text-blue-400'}`;
+      const roleBadge = document.getElementById('my-role-display');
+      const teamName = this.myTeam === 'red' ? 'ROJO' : 'AZUL';
+      const roleName = this.role === 'guia' ? 'Guía' : 'Agente';
+      roleBadge.textContent = `Tu rol: ${teamName} · ${roleName}`;
+      roleBadge.className = `text-center text-xs font-bold px-2 py-1 rounded-lg ${this.myTeam === 'red' ? 'text-red-400' : 'text-blue-400'}`;
+      roleBadge.classList.remove('hidden');
     }
 
     document.getElementById('spymaster-controls').classList.toggle('hidden', !showSpymaster);
     document.getElementById('agent-controls').classList.toggle('hidden', !showAgent);
-
-    // Etiqueta de turno en modo 2p muestra la fase
-    const phaseLabel = state.twoPlayerMode
-      ? (state.phase === 'clue' ? ' · DAR PISTA' : ' · ADIVINAR')
-      : '';
-    this.displays.turnIndicator.textContent = `${state.turn.toUpperCase()}${phaseLabel}`;
-    this.displays.turnIndicator.className = `px-3 py-1 rounded-xl text-xs font-black uppercase tracking-widest border ${state.turn === 'red' ? 'border-red-500 bg-red-900/30 text-red-400' : 'border-blue-500 bg-blue-900/30 text-blue-400'}`;
 
     if (state.clue) {
       this.displays.clueDisplay.classList.remove('hidden');
@@ -449,24 +503,32 @@ class JuegoCodigoSecreto {
   async handleCellClick(index) {
     const state = this.room.game_state;
     const canGuess = state.twoPlayerMode
-      ? (state.turn === this.myTeam && state.phase === 'guess')
+      ? (state.spymasterId !== this.user.id && state.phase === 'guess')
       : (this.role !== 'guia' && !!state.clue && state.turn === this.myTeam);
     if (!canGuess) return;
-    
+
     const cell = state.grid[index];
     if (cell.revealed) return;
-
     cell.revealed = true;
 
-    if (cell.type === 'assassin') {
-      this.endGame(state.turn === 'red' ? 'blue' : 'red');
-    } else if (cell.type !== state.turn) {
-      // Fallo: civil o equipo rival → fin de turno inmediato
-      this.switchTurn();
+    if (state.twoPlayerMode) {
+      if (cell.type === 'assassin') {
+        this.endGame('lose');
+      } else if (cell.type === 'civil') {
+        this.switchPhaseToClue();
+      } else {
+        state.guessesLeft = (state.guessesLeft ?? 1) - 1;
+        if (state.guessesLeft <= 0) this.switchPhaseToClue();
+      }
     } else {
-      // Acierto: descontar un intento
-      state.guessesLeft = (state.guessesLeft ?? 1) - 1;
-      if (state.guessesLeft <= 0) this.switchTurn();
+      if (cell.type === 'assassin') {
+        this.endGame(state.turn === 'red' ? 'blue' : 'red');
+      } else if (cell.type !== state.turn) {
+        this.switchTurn();
+      } else {
+        state.guessesLeft = (state.guessesLeft ?? 1) - 1;
+        if (state.guessesLeft <= 0) this.switchTurn();
+      }
     }
 
     this.checkWinCondition();
@@ -500,9 +562,21 @@ class JuegoCodigoSecreto {
   }
 
   handleEndTurn() {
-    this.switchTurn();
-    this.socket.emit('turn_switch', { newTurn: this.room.game_state.turn });
+    if (this.room.game_state.twoPlayerMode) {
+      this.switchPhaseToClue();
+      this.saveState();
+      this.socket.emit('turn_switch', { phase: 'clue' });
+    } else {
+      this.switchTurn();
+      this.socket.emit('turn_switch', { newTurn: this.room.game_state.turn });
+    }
+    this.renderBoard();
     this.updateGameState(this.room.game_state);
+  }
+
+  switchPhaseToClue() {
+    const s = this.room.game_state;
+    s.clue = null; s.count = 0; s.guessesLeft = 0; s.phase = 'clue';
   }
 
   switchTurn() {
@@ -519,19 +593,30 @@ class JuegoCodigoSecreto {
 
   checkWinCondition() {
     const state = this.room.game_state;
-    const redTotal = state.grid.filter(c => c.type === 'red').length;
-    const blueTotal = state.grid.filter(c => c.type === 'blue').length;
-    const redFound = state.grid.filter(c => c.type === 'red' && c.revealed).length;
-    const blueFound = state.grid.filter(c => c.type === 'blue' && c.revealed).length;
-
-    if (redFound === redTotal) this.endGame('red');
-    if (blueFound === blueTotal) this.endGame('blue');
+    if (state.twoPlayerMode) {
+      const total = state.grid.filter(c => c.type === 'red').length;
+      const found = state.grid.filter(c => c.type === 'red' && c.revealed).length;
+      if (found === total) this.endGame('win');
+    } else {
+      const redTotal = state.grid.filter(c => c.type === 'red').length;
+      const blueTotal = state.grid.filter(c => c.type === 'blue').length;
+      if (state.grid.filter(c => c.type === 'red' && c.revealed).length === redTotal) this.endGame('red');
+      if (state.grid.filter(c => c.type === 'blue' && c.revealed).length === blueTotal) this.endGame('blue');
+    }
   }
 
-  endGame(winner) {
-    const title = winner === 'red' ? '¡VICTORIA ROJA!' : '¡VICTORIA AZUL!';
-    document.getElementById('winner-title').textContent = title;
-    document.getElementById('winner-title').className = `text-3xl font-black mb-2 ${winner === 'red' ? 'text-red-500' : 'text-blue-500'}`;
+  endGame(result) {
+    const configs = {
+      win:  { icon: '🎉', title: '¡VICTORIA!',      sub: 'Habéis encontrado todas las palabras.', cls: 'text-green-400' },
+      lose: { icon: '💀', title: '¡GAME OVER!',     sub: 'El asesino ha sido descubierto.',       cls: 'text-red-500'   },
+      red:  { icon: '🏆', title: '¡VICTORIA ROJA!', sub: 'El equipo rojo ha ganado.',              cls: 'text-red-500'   },
+      blue: { icon: '🏆', title: '¡VICTORIA AZUL!', sub: 'El equipo azul ha ganado.',              cls: 'text-blue-500'  },
+    };
+    const c = configs[result] || configs.red;
+    document.querySelector('#modal-result .text-5xl').textContent = c.icon;
+    document.getElementById('winner-title').textContent = c.title;
+    document.getElementById('winner-title').className = `text-3xl font-black mb-2 ${c.cls}`;
+    document.getElementById('winner-subtitle').textContent = c.sub;
     this.displays.modalResult.classList.remove('hidden');
   }
 

@@ -72,9 +72,14 @@
         <h2 class="font-black text-lg tracking-tight">Cuartel General</h2>
         <p class="text-gray-400 text-xs">Agente: <span id="display-username" class="text-brand font-bold">---</span></p>
       </div>
-      <button id="btn-logout" class="text-gray-500 hover:text-white transition text-xs px-3 py-1 border border-gray-700 rounded-lg">
-        Salir
-      </button>
+      <div class="flex gap-2">
+        <button id="btn-rules" class="text-gray-500 hover:text-white transition text-xs px-3 py-1 border border-gray-700 rounded-lg">
+          Reglas
+        </button>
+        <button id="btn-logout" class="text-gray-500 hover:text-white transition text-xs px-3 py-1 border border-gray-700 rounded-lg">
+          Salir
+        </button>
+      </div>
     </header>
 
     <div class="flex flex-col gap-4 flex-1">
@@ -146,7 +151,7 @@
       <div class="bg-gray-900 border border-gray-800 rounded-2xl p-4 flex flex-col gap-4">
         <p class="text-xs text-gray-500 uppercase tracking-widest">Configuración</p>
 
-        <!-- Modo 2 jugadores -->
+        <!-- Modo Un Equipo -->
         <label class="flex items-center gap-3 cursor-pointer select-none">
           <div class="relative shrink-0">
             <input type="checkbox" id="config-2player" class="sr-only peer" />
@@ -154,8 +159,8 @@
             <div class="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
           </div>
           <div>
-            <div class="text-sm font-bold text-gray-200">Modo 2 jugadores</div>
-            <div class="text-xs text-gray-500">Cada jugador es guía y agente de su equipo</div>
+            <div class="text-sm font-bold text-gray-200">Modo Un Equipo</div>
+            <div class="text-xs text-gray-500">Cooperativo: un espía da pistas, el resto adivina</div>
           </div>
         </label>
         <hr class="border-gray-800" />
@@ -218,24 +223,32 @@
   <section id="screen-game" class="screen gap-3">
 
     <!-- HUD: marcador y turno -->
-    <div class="flex items-center gap-2 flex-wrap">
-      <!-- Rojo -->
-      <div class="flex items-center gap-2 bg-red-950/60 border border-red-800 rounded-xl px-3 py-2 flex-1 min-w-0">
+    <!-- Modo equipos -->
+    <div id="hud-teams" class="flex items-center gap-2">
+      <div class="flex items-center gap-2 bg-red-950/60 border border-red-800 rounded-xl px-3 py-2 flex-1">
         <div class="w-3 h-3 rounded-full bg-red-500 shrink-0"></div>
         <span class="text-red-400 font-black text-lg" id="score-red">0</span>
         <span class="text-red-700 text-xs">/9</span>
       </div>
-      <!-- Turno -->
-      <div id="turn-indicator" class="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border border-gray-700 bg-gray-900 text-gray-400 shrink-0">
-        TURNO ---
-      </div>
-      <!-- Azul -->
-      <div class="flex items-center gap-2 bg-blue-950/60 border border-blue-800 rounded-xl px-3 py-2 flex-1 min-w-0 justify-end">
+      <div id="turn-indicator" class="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border border-gray-700 bg-gray-900 text-gray-400 shrink-0">TURNO ---</div>
+      <div class="flex items-center gap-2 bg-blue-950/60 border border-blue-800 rounded-xl px-3 py-2 flex-1 justify-end">
         <span class="text-blue-700 text-xs">/8</span>
         <span class="text-blue-400 font-black text-lg" id="score-blue">0</span>
         <div class="w-3 h-3 rounded-full bg-blue-500 shrink-0"></div>
       </div>
     </div>
+    <!-- Modo 2 jugadores -->
+    <div id="hud-2p" class="hidden flex items-center gap-2">
+      <div id="role-badge" class="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border border-gray-700 bg-gray-900 text-gray-400">---</div>
+      <div id="turn-indicator-2p" class="flex-1 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border border-gray-700 bg-gray-900 text-gray-400 text-center">---</div>
+      <div class="flex items-center gap-1 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2">
+        <span class="text-green-400 font-black text-lg" id="score-2p">0</span>
+        <span class="text-gray-600 text-xs">/9</span>
+      </div>
+    </div>
+
+    <!-- Badge de rol del jugador -->
+    <div id="my-role-display" class="hidden text-center text-xs font-bold px-2 py-1 rounded-lg"></div>
 
     <!-- Pista activa -->
     <div id="clue-display" class="hidden bg-gray-900 border border-gray-700 rounded-xl px-4 py-2 flex items-center gap-3">
@@ -278,11 +291,78 @@
   <div class="bg-gray-900 border border-gray-700 rounded-3xl p-8 text-center max-w-xs w-full animate-fade">
     <div class="text-5xl mb-4">🏆</div>
     <h2 id="winner-title" class="text-3xl font-black mb-2">---</h2>
-    <p class="text-gray-400 text-sm mb-6">La partida ha terminado.</p>
+    <p id="winner-subtitle" class="text-gray-400 text-sm mb-6">La partida ha terminado.</p>
     <button id="btn-back-lobby-modal"
       class="w-full bg-brand hover:bg-brand-dark active:scale-95 transition font-bold py-3 rounded-xl text-sm">
       Volver al lobby
     </button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL REGLAS ══════════════════════ -->
+<div id="modal-rules" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+  <div class="bg-gray-900 border border-gray-700 rounded-3xl p-6 max-w-sm w-full animate-fade overflow-y-auto max-h-[90vh]">
+    <div class="flex items-center justify-between mb-5">
+      <h2 class="font-black text-lg">Cómo jugar</h2>
+      <button id="btn-close-rules" class="text-gray-500 hover:text-white transition text-xl leading-none">✕</button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex gap-1 mb-5 bg-gray-800 rounded-xl p-1">
+      <button data-tab="teams" class="tab-btn flex-1 py-1.5 rounded-lg text-xs font-bold transition bg-gray-700 text-white">Dos Equipos</button>
+      <button data-tab="coop" class="tab-btn flex-1 py-1.5 rounded-lg text-xs font-bold transition text-gray-400">Un Equipo</button>
+    </div>
+
+    <!-- Dos Equipos -->
+    <div id="rules-teams" class="flex flex-col gap-3 text-sm">
+      <div class="bg-gray-800 rounded-xl p-3">
+        <p class="font-bold text-gray-200 mb-1">Objetivo</p>
+        <p class="text-gray-400 text-xs">Encontrar todas las palabras de tu equipo antes que el rival. El equipo que empieza tiene 9 palabras, el otro 8.</p>
+      </div>
+      <div class="bg-gray-800 rounded-xl p-3">
+        <p class="font-bold text-gray-200 mb-1">Roles <span class="text-xs text-brand font-normal">(asignados al azar)</span></p>
+        <div class="flex flex-col gap-1 text-xs text-gray-400">
+          <p>🔍 <strong class="text-gray-200">Guía (Espía)</strong> — ve los colores de todas las palabras. Da una pista: <em>una palabra + un número</em>.</p>
+          <p>👤 <strong class="text-gray-200">Agente</strong> — no ve los colores. Adivina las palabras basándose en la pista.</p>
+        </div>
+      </div>
+      <div class="bg-gray-800 rounded-xl p-3">
+        <p class="font-bold text-gray-200 mb-1">Turno</p>
+        <div class="flex flex-col gap-1 text-xs text-gray-400">
+          <p>1. El Guía da una pista relacionada con N palabras de su equipo.</p>
+          <p>2. Los Agentes seleccionan palabras. Pueden seleccionar hasta N palabras.</p>
+          <p>✅ <strong class="text-green-400">Acierto</strong> — sigue jugando (hasta agotar intentos).</p>
+          <p>⬜ <strong class="text-yellow-300">Civil</strong> — fin del turno, pasa al rival.</p>
+          <p>🟥 <strong class="text-red-400">Rival</strong> — fin del turno y suma un punto al rival.</p>
+          <p>💀 <strong class="text-red-500">Asesino</strong> — derrota inmediata.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Un Equipo -->
+    <div id="rules-coop" class="hidden flex flex-col gap-3 text-sm">
+      <div class="bg-gray-800 rounded-xl p-3">
+        <p class="font-bold text-gray-200 mb-1">Objetivo</p>
+        <p class="text-gray-400 text-xs">Todos juntos encontrad las 9 palabras objetivo sin tocar al asesino.</p>
+      </div>
+      <div class="bg-gray-800 rounded-xl p-3">
+        <p class="font-bold text-gray-200 mb-1">Roles <span class="text-xs text-brand font-normal">(aleatorios al empezar)</span></p>
+        <div class="flex flex-col gap-1 text-xs text-gray-400">
+          <p>🔍 <strong class="text-gray-200">Espía</strong> — ve las 9 palabras objetivo. Da pistas al equipo.</p>
+          <p>👥 <strong class="text-gray-200">Agentes</strong> — no ven los colores. Adivinan en equipo.</p>
+        </div>
+      </div>
+      <div class="bg-gray-800 rounded-xl p-3">
+        <p class="font-bold text-gray-200 mb-1">Turno</p>
+        <div class="flex flex-col gap-1 text-xs text-gray-400">
+          <p>1. El Espía da una pista (palabra + número de objetivos relacionados).</p>
+          <p>2. Los Agentes seleccionan palabras, hasta N veces.</p>
+          <p>✅ <strong class="text-green-400">Objetivo</strong> — sigue eligiendo.</p>
+          <p>⬜ <strong class="text-yellow-300">Civil</strong> — fin de la ronda, el espía da otra pista.</p>
+          <p>💀 <strong class="text-red-500">Asesino</strong> — derrota inmediata.</p>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -300,11 +380,23 @@
   document.addEventListener('DOMContentLoaded', () => {
     const src = document.getElementById('display-username');
     if (src) obs.observe(src, { childList: true, characterData: true, subtree: true });
-    // Modal back button
+    // Modal result
     document.getElementById('btn-back-lobby-modal').onclick = () => {
       document.getElementById('modal-result').classList.add('hidden');
       window.game && window.game.showScreen('lobby');
     };
+    // Modal reglas
+    document.getElementById('btn-rules').onclick = () => document.getElementById('modal-rules').classList.remove('hidden');
+    document.getElementById('btn-close-rules').onclick = () => document.getElementById('modal-rules').classList.add('hidden');
+    document.getElementById('modal-rules').onclick = (e) => { if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden'); };
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.onclick = () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.replace('bg-gray-700','bg-transparent') || b.classList.replace('text-white','text-gray-400'));
+        btn.classList.replace('bg-transparent','bg-gray-700'); btn.classList.replace('text-gray-400','text-white');
+        document.getElementById('rules-teams').classList.toggle('hidden', btn.dataset.tab !== 'teams');
+        document.getElementById('rules-coop').classList.toggle('hidden', btn.dataset.tab !== 'coop');
+      };
+    });
   });
 </script>
 </body>
