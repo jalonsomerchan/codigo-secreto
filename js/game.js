@@ -438,7 +438,9 @@ class JuegoCodigoSecreto {
     if (state.clue) {
       this.displays.clueDisplay.classList.remove('hidden');
       this.displays.currentClue.textContent = state.clue;
-      this.displays.currentCount.textContent = state.count;
+      const left = state.guessesLeft ?? state.count ?? 0;
+      this.displays.currentCount.textContent = left;
+      this.displays.currentCount.className = `rounded-lg px-2 py-0.5 text-sm font-bold ${left > 0 ? 'bg-gray-700' : 'bg-red-900 text-red-300'}`;
     } else {
       this.displays.clueDisplay.classList.add('hidden');
     }
@@ -455,13 +457,18 @@ class JuegoCodigoSecreto {
     if (cell.revealed) return;
 
     cell.revealed = true;
-    
+
     if (cell.type === 'assassin') {
       this.endGame(state.turn === 'red' ? 'blue' : 'red');
     } else if (cell.type !== state.turn) {
+      // Fallo: civil o equipo rival → fin de turno inmediato
       this.switchTurn();
+    } else {
+      // Acierto: descontar un intento
+      state.guessesLeft = (state.guessesLeft ?? 1) - 1;
+      if (state.guessesLeft <= 0) this.switchTurn();
     }
-    
+
     this.checkWinCondition();
     this.saveState();
     
@@ -482,6 +489,7 @@ class JuegoCodigoSecreto {
 
     this.room.game_state.clue = clue;
     this.room.game_state.count = count;
+    this.room.game_state.guessesLeft = count;
     if (this.room.game_state.twoPlayerMode) this.room.game_state.phase = 'guess';
     this.inputs.clueWord.value = '';
     this.inputs.clueCount.value = '';
@@ -501,6 +509,7 @@ class JuegoCodigoSecreto {
     this.room.game_state.turn = this.room.game_state.turn === 'red' ? 'blue' : 'red';
     this.room.game_state.clue = null;
     this.room.game_state.count = 0;
+    this.room.game_state.guessesLeft = 0;
     this.room.game_state.phase = 'clue';
   }
 
@@ -537,6 +546,7 @@ class JuegoCodigoSecreto {
     if (this.room && this.room.game_state) {
       this.room.game_state.clue = clue;
       this.room.game_state.count = count;
+      this.room.game_state.guessesLeft = count;
       if (this.room.game_state.twoPlayerMode) this.room.game_state.phase = 'guess';
       this.renderBoard();
       this.updateGameState(this.room.game_state);
