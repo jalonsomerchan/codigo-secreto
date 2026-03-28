@@ -57,10 +57,10 @@ class GameAPI {
   // --- MÉTODOS DE SALA (ROOMS) ---
 
   /** Crea una sala nueva. El host se une automáticamente. */
-  async createRoom(gameId, userId, roomSettings = {}, initialState = { status: 'waiting' }) {
+  async createRoom(gameId, hostId, roomSettings = {}, initialState = { status: 'waiting' }) {
     return this._request('rooms', 'POST', {
       game_id: gameId,
-      user_id: userId,
+      host_id: hostId,
       room_settings: roomSettings,
       game_state: initialState
     });
@@ -101,5 +101,5 @@ class GameAPI {
   }
 }
 
-// Exportar para uso en módulos
-export default GameAPI;
+// Exportar para uso en módulos o adjuntar al window
+// export default GameAPI;

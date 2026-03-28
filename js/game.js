@@ -1,15 +1,43 @@
 import { PALABRAS } from './palabras.js';
-import GameAPI from './GameAPI.js';
+import { connect } from 'https://esm.sh/itty-sockets';
+
+// Wrapper fino sobre itty-sockets para mantener la API de named events
+class IttySockets {
+  constructor(roomCode, userId) {
+    this._userId = userId;
+    this._listeners = {};
+    this._socket = connect(roomCode);
+    this._socket.on('message', (msg) => {
+      if (!msg || !msg.event) return;
+      if (msg.from === userId) return; // ignorar propios
+      (this._listeners[msg.event] || []).forEach(cb => cb(msg.data));
+    });
+  }
+
+  on(event, cb) {
+    if (!this._listeners[event]) this._listeners[event] = [];
+    this._listeners[event].push(cb);
+  }
+
+  emit(event, data) {
+    this._socket.send({ event, data, from: this._userId });
+  }
+
+  close() {
+    this._socket.open(); // reconnect guard — itty-sockets no tiene close explícito
+  }
+}
 
 class JuegoCodigoSecreto {
   constructor() {
+    // GameAPI ya está en el scope global por el script en index.html
     this.api = new GameAPI();
     this.user = JSON.parse(localStorage.getItem('cs_user')) || null;
     this.room = null;
     this.socket = null;
     this.roomCode = null;
     this.isHost = false;
-    this.role = 'agent'; // 'guia' o 'agent'
+    this.role = 'agent';
     
     this.init();
   }
@@ -69,11 +97,24 @@ class JuegoCodigoSecreto {
     this.btns.backLobby.onclick = () => this.showScreen('lobby');
     this.btns.logout.onclick = () => this.handleLogout();
     this.btns.share.onclick = () => this.handleShare();
+    document.getElementById('btn-copy-link').onclick = () => this.handleCopyLink();
+  }
+
+  handleCopyLink() {
+    const url = `${window.location.origin}${window.location.pathname}?room=${this.roomCode}`;
+    navigator.clipboard.writeText(url).then(() => {
+      const btn = document.getElementById('btn-copy-link');
+      const orig = btn.textContent;
+      btn.textContent = '¡Copiado!';
+      btn.classList.add('bg-green-700');
+      setTimeout(() => { btn.textContent = orig; btn.classList.remove('bg-green-700'); }, 2000);
+    });
   }
 
   handleLogout() {
     localStorage.removeItem('cs_user');
     this.user = null;
+    this.displays.username.textContent = '---';
     this.showScreen('login');
   }
 
@@ -92,17 +133,20 @@ class JuegoCodigoSecreto {
   }
 
   checkSession() {
-    if (this.user) {
-      this.displays.username.textContent = this.user.username;
-      this.showScreen('lobby');
-    }
-    
-    // Check for room code in URL
     const params = new URLSearchParams(window.location.search);
     const code = params.get('room');
-    if (code) {
-      this.inputs.roomCode.value = code;
-      if (this.user) this.handleJoinRoom(code);
+
+    if (this.user) {
+      this.displays.username.textContent = this.user.username;
+      if (code) {
+        this.inputs.roomCode.value = code;
+        this.handleJoinRoom(code);
+      } else {
+        this.showScreen('lobby');
+      }
+    } else {
+      if (code) this.inputs.roomCode.value = code;
+      this.showScreen('login');
     }
   }
 
@@ -112,18 +156,27 @@ class JuegoCodigoSecreto {
     
     try {
       const res = await this.api.createUser(username, '123456');
-      this.user = { id: res.user_id, username };
+      const userId = res.user_id || res.id;
+      if (!userId) throw new Error('No se recibió ID de usuario');
+
+      this.user = { id: userId, username };
       localStorage.setItem('cs_user', JSON.stringify(this.user));
       this.displays.username.textContent = username;
-      this.showScreen('lobby');
+      const pendingCode = this.inputs.roomCode.value.trim().toUpperCase();
+      if (pendingCode) {
+        this.handleJoinRoom(pendingCode);
+      } else {
+        this.showScreen('lobby');
+      }
     } catch (err) {
-      alert('Error al crear usuario');
+      alert('Error al crear usuario: ' + err.message);
     }
   }
 
   async handleCreateRoom() {
     try {
-      // Usamos el ID de juego 16 (ajustar si es necesario)
+      if (!this.user || !this.user.id) throw new Error('Usuario no autenticado');
+      
       const room = await this.api.createRoom(
         16, 
         this.user.id, 
@@ -134,7 +187,7 @@ class JuegoCodigoSecreto {
       this.role = 'guia';
       this.enterRoom(room.room_code);
     } catch (err) {
-      alert('Error al crear sala');
+      alert('Error al crear sala: ' + err.message);
     }
   }
 
@@ -156,8 +209,24 @@ class JuegoCodigoSecreto {
     this.roomCode = code;
     this.displays.roomCode.textContent = code;
     this.showScreen('waiting');
-    this.connectSocket();
-    this.refreshRoom();
+    this.generateQR(code);
+    this.initSocket();
+    await this.refreshRoom();
+    this.socket.emit('player_joined', { userId: this.user.id, username: this.user.username });
+    // Polling de respaldo por si IttySockets no releva el evento
+    clearInterval(this._pollInterval);
+    this._pollInterval = setInterval(() => {
+      if (this.screens.waiting.classList.contains('active')) this.refreshRoom();
+      else clearInterval(this._pollInterval);
+    }, 3000);
+  }
+
+  generateQR(code) {
+    const container = document.getElementById('qr-container');
+    if (!container || typeof QRCode === 'undefined') return;
+    container.innerHTML = '';
+    const url = `${window.location.origin}${window.location.pathname}?room=${code}`;
+    new QRCode(container, { text: url, width: 80, height: 80, colorDark: '#000', colorLight: '#fff', correctLevel: QRCode.CorrectLevel.M });
   }
 
   async refreshRoom() {
@@ -172,66 +241,53 @@ class JuegoCodigoSecreto {
     }
   }
 
-  connectSocket() {
-    const socketUrl = `wss://alon.one/juegos/api/socket?room=${this.roomCode}&user=${this.user.id}`;
-    this.socket = new WebSocket(socketUrl);
+  initSocket() {
+    if (this.socket) this.socket.close();
+    
+    // IttySockets global por script en index.html
+    this.socket = new IttySockets(this.roomCode, this.user.id);
 
-    this.socket.onmessage = (e) => {
-      const data = JSON.parse(e.data);
-      this.handleSocketMessage(data);
-    };
+    this.socket.on('player_joined', () => this.refreshRoom());
+    this.socket.on('player_left', () => this.refreshRoom());
+    
+    this.socket.on('game_started', (data) => {
+      this.room = data.room;
+      this.startGame();
+    });
 
-    this.socket.onclose = () => {
-      console.log('Socket cerrado. Reintentando...');
-      setTimeout(() => this.connectSocket(), 3000);
-    };
-  }
+    this.socket.on('word_reveal', (data) => {
+      this.revealWordLocal(data.index, data.wordType);
+      this.updateGameState(data.newState);
+    });
 
-  handleSocketMessage(data) {
-    switch (data.type) {
-      case 'player_joined':
-      case 'player_left':
-        this.refreshRoom();
-        break;
-      case 'game_started':
-        this.room = data.room;
-        this.startGame();
-        break;
-      case 'word_reveal':
-        this.revealWordLocal(data.index, data.wordType);
-        this.updateGameState(data.newState);
-        break;
-      case 'clue_sent':
-        this.showClue(data.clue, data.count);
-        break;
-      case 'turn_switch':
-        this.switchTurnLocal(data.newTurn);
-        break;
-    }
+    this.socket.on('clue_sent', (data) => {
+      this.showClue(data.clue, data.count);
+    });
+
+    this.socket.on('turn_switch', (data) => {
+      this.switchTurnLocal(data.newTurn);
+    });
   }
 
   updateUI(room) {
-    this.displays.playerList.innerHTML = room.players.map(p => `
-      <li class="flex items-center gap-3 p-3 bg-gray-800 rounded-xl border border-gray-700 animate-slide-up">
-        <div class="w-10 h-10 rounded-full bg-brand flex items-center justify-center font-bold">
-          ${p.username[0].toUpperCase()}
+    const players = room.players || room.participants || [];
+    this.displays.playerList.innerHTML = players.map(p => `
+      <li class="flex items-center gap-3 p-3 bg-gray-800 rounded-xl border border-gray-700">
+        <div class="w-10 h-10 rounded-full bg-brand flex items-center justify-center font-bold text-sm">
+          ${p.username ? p.username[0].toUpperCase() : '?'}
         </div>
         <div class="flex-1">
-          <div class="font-bold">${p.username} ${p.user_id === this.user.id ? '<span class="text-xs text-brand">(Tú)</span>' : ''}</div>
+          <div class="font-bold text-sm">${p.username || 'Desconocido'} ${p.user_id === this.user.id ? '<span class="text-xs text-brand">(Tú)</span>' : ''}</div>
           <div class="text-[10px] text-gray-500 uppercase">${p.user_id === room.host_id ? 'Anfitrión' : 'Jugador'}</div>
         </div>
       </li>
-    `).join('');
+    `).join('') || '<li class="text-gray-600 text-sm text-center py-4">Esperando jugadores...</li>';
 
-    if (this.isHost) {
-      document.getElementById('admin-controls').classList.remove('hidden');
-      document.getElementById('player-waiting-msg').classList.add('hidden');
-    } else {
-      document.getElementById('admin-controls').classList.add('hidden');
-      document.getElementById('player-waiting-msg').classList.remove('hidden');
-    }
+    document.getElementById('admin-controls').classList.toggle('hidden', !this.isHost);
+    document.getElementById('player-waiting-msg').classList.toggle('hidden', this.isHost);
 
-    if (room.status === 'playing' && this.screens.game.style.display !== 'flex') {
+    if (room.status === 'playing' && !this.screens.game.classList.contains('active')) {
+      clearInterval(this._pollInterval);
       this.room = room;
       this.startGame();
     }
@@ -239,7 +295,10 @@ class JuegoCodigoSecreto {
 
   async handleStartGame() {
     const grid = this.generateGrid();
-    const firstTurn = Math.random() > 0.5 ? 'red' : 'blue';
+    const firstTurnEl = document.querySelector('input[name="first-turn"]:checked');
+    const picked = firstTurnEl?.value ?? 'random';
+    const firstTurn = picked === 'random' ? (Math.random() > 0.5 ? 'red' : 'blue') : picked;
+    const timePerTurn = parseInt(document.getElementById('config-time')?.value) || 90;
     this.assignTypes(grid, firstTurn);
 
     const gameState = {
@@ -247,15 +306,24 @@ class JuegoCodigoSecreto {
       turn: firstTurn,
       score: { red: 0, blue: 0 },
       clue: null,
+      timePerTurn,
       status: 'playing'
     };
 
-    await this.api.updateRoomState(this.roomCode, { 
-      status: 'playing',
-      gameState 
-    });
+    try {
+      await this.api.updateRoomState(this.roomCode, { status: 'playing', gameState });
+    } catch (err) {
+      alert('Error al iniciar: ' + err.message);
+      return;
+    }
 
-    this.socket.send(JSON.stringify({ type: 'start_game', room: { ...this.room, game_state: gameState, status: 'playing' } }));
+    const updatedRoom = { ...this.room, game_state: gameState, status: 'playing' };
+    this.socket.emit('game_started', { room: updatedRoom });
+
+    // El host no recibe su propio emit, arrancamos directamente
+    clearInterval(this._pollInterval);
+    this.room = updatedRoom;
+    this.startGame();
   }
 
   generateGrid() {
@@ -367,12 +435,11 @@ class JuegoCodigoSecreto {
     this.checkWinCondition();
     this.saveState();
     
-    this.socket.send(JSON.stringify({
-      type: 'word_reveal',
+    this.socket.emit('word_reveal', {
       index,
       wordType: cell.type,
       newState: this.room.game_state
-    }));
+    });
 
     this.renderBoard();
     this.updateGameState(this.room.game_state);
@@ -387,13 +454,13 @@ class JuegoCodigoSecreto {
     this.room.game_state.count = count;
     this.saveState();
 
-    this.socket.send(JSON.stringify({ type: 'clue_sent', clue, count }));
+    this.socket.emit('clue_sent', { clue, count });
     this.updateGameState(this.room.game_state);
   }
 
   handleEndTurn() {
     this.switchTurn();
-    this.socket.send(JSON.stringify({ type: 'turn_switch', newTurn: this.room.game_state.turn }));
+    this.socket.emit('turn_switch', { newTurn: this.room.game_state.turn });
     this.updateGameState(this.room.game_state);
   }
 
