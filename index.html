@@ -146,6 +146,20 @@
       <div class="bg-gray-900 border border-gray-800 rounded-2xl p-4 flex flex-col gap-4">
         <p class="text-xs text-gray-500 uppercase tracking-widest">Configuración</p>
 
+        <!-- Modo 2 jugadores -->
+        <label class="flex items-center gap-3 cursor-pointer select-none">
+          <div class="relative shrink-0">
+            <input type="checkbox" id="config-2player" class="sr-only peer" />
+            <div class="w-10 h-6 bg-gray-700 rounded-full peer-checked:bg-brand transition-colors"></div>
+            <div class="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+          </div>
+          <div>
+            <div class="text-sm font-bold text-gray-200">Modo 2 jugadores</div>
+            <div class="text-xs text-gray-500">Cada jugador es guía y agente de su equipo</div>
+          </div>
+        </label>
+        <hr class="border-gray-800" />
+
         <!-- Primer turno -->
         <div>
           <p class="text-xs text-gray-400 mb-2">Equipo que empieza (9 palabras)</p>

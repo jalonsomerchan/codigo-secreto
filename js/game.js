@@ -301,12 +301,15 @@ class JuegoCodigoSecreto {
     const timePerTurn = parseInt(document.getElementById('config-time')?.value) || 90;
     this.assignTypes(grid, firstTurn);
 
+    const twoPlayerMode = document.getElementById('config-2player')?.checked || false;
     const gameState = {
       grid,
       turn: firstTurn,
       score: { red: 0, blue: 0 },
       clue: null,
       timePerTurn,
+      twoPlayerMode,
+      phase: 'clue',
       status: 'playing'
     };
 
@@ -353,15 +356,24 @@ class JuegoCodigoSecreto {
     this.updateGameState(this.room.game_state);
   }
 
+  get myTeam() { return this.isHost ? 'red' : 'blue'; }
+
   renderBoard() {
+    const state = this.room.game_state;
     this.displays.board.innerHTML = '';
-    this.room.game_state.grid.forEach((cell, i) => {
+    state.grid.forEach((cell, i) => {
       const btn = document.createElement('button');
-      btn.className = `h-20 sm:h-24 rounded-lg p-2 flex items-center justify-center text-center text-[10px] sm:text-xs font-bold uppercase transition-all shadow-md border-2 border-transparent bg-gray-800 hover:scale-[1.02] active:scale-95`;
+      btn.className = `word-card rounded-lg p-2 flex items-center justify-center text-center font-bold uppercase transition-all shadow-md border-2 border-transparent bg-gray-800 hover:scale-[1.02] active:scale-95`;
       btn.textContent = cell.word;
-      
-      if (cell.revealed || this.role === 'guia') {
-        this.applyCellColor(btn, cell.type, cell.revealed);
+
+      // En modo 2 jugadores: cada jugador ve solo sus propias palabras (sin revelar)
+      // En modo normal: el guía ve todas
+      const showAsGuide = state.twoPlayerMode
+        ? cell.type === this.myTeam
+        : this.role === 'guia';
+
+      if (cell.revealed || showAsGuide) {
+        this.applyCellColor(btn, cell.type, cell.revealed, !cell.revealed);
       }
 
       btn.onclick = () => this.handleCellClick(i);
@@ -369,16 +381,16 @@ class JuegoCodigoSecreto {
     });
   }
 
-  applyCellColor(el, type, revealed) {
+  applyCellColor(el, type, revealed, asHint = false) {
     const colors = {
       red: 'bg-red-600 text-white border-red-400',
       blue: 'bg-blue-600 text-white border-blue-400',
       civil: 'bg-yellow-100 text-gray-800 border-yellow-200',
       assassin: 'bg-gray-900 text-white border-red-900'
     };
-
-    if (this.role === 'guia' && !revealed) {
-      el.classList.add('opacity-60', 'border-dashed');
+    if (asHint) {
+      // Muestra el color semi-transparente (modo guía o propio equipo en 2p)
+      el.classList.add('opacity-50', 'border-dashed');
       el.classList.add(...colors[type].split(' '));
     } else if (revealed) {
       el.classList.remove('bg-gray-800', 'text-white');
@@ -401,12 +413,28 @@ class JuegoCodigoSecreto {
 
   updateControls() {
     const state = this.room.game_state;
-    const isGuia = this.role === 'guia';
-    const isMyTurn = state.turn === (this.isHost ? 'red' : 'blue'); 
-    
-    document.getElementById('spymaster-controls').classList.toggle('hidden', !isGuia || !isMyTurn || state.clue);
-    document.getElementById('agent-controls').classList.toggle('hidden', isGuia || !isMyTurn || !state.clue);
-    
+    const isMyTurn = state.turn === this.myTeam;
+    let showSpymaster, showAgent;
+
+    if (state.twoPlayerMode) {
+      showSpymaster = isMyTurn && state.phase === 'clue' && !state.clue;
+      showAgent     = isMyTurn && state.phase === 'guess';
+    } else {
+      const isGuia = this.role === 'guia';
+      showSpymaster = isGuia && isMyTurn && !state.clue;
+      showAgent     = !isGuia && isMyTurn && !!state.clue;
+    }
+
+    document.getElementById('spymaster-controls').classList.toggle('hidden', !showSpymaster);
+    document.getElementById('agent-controls').classList.toggle('hidden', !showAgent);
+
+    // Etiqueta de turno en modo 2p muestra la fase
+    const phaseLabel = state.twoPlayerMode
+      ? (state.phase === 'clue' ? ' · DAR PISTA' : ' · ADIVINAR')
+      : '';
+    this.displays.turnIndicator.textContent = `${state.turn.toUpperCase()}${phaseLabel}`;
+    this.displays.turnIndicator.className = `px-3 py-1 rounded-xl text-xs font-black uppercase tracking-widest border ${state.turn === 'red' ? 'border-red-500 bg-red-900/30 text-red-400' : 'border-blue-500 bg-blue-900/30 text-blue-400'}`;
+
     if (state.clue) {
       this.displays.clueDisplay.classList.remove('hidden');
       this.displays.currentClue.textContent = state.clue;
@@ -417,9 +445,11 @@ class JuegoCodigoSecreto {
   }
 
   async handleCellClick(index) {
-    if (this.role === 'guia') return; 
     const state = this.room.game_state;
-    if (!state.clue) return alert('Espera a la pista de tu Guía');
+    const canGuess = state.twoPlayerMode
+      ? (state.turn === this.myTeam && state.phase === 'guess')
+      : (this.role !== 'guia' && !!state.clue && state.turn === this.myTeam);
+    if (!canGuess) return;
     
     const cell = state.grid[index];
     if (cell.revealed) return;
@@ -452,9 +482,12 @@ class JuegoCodigoSecreto {
 
     this.room.game_state.clue = clue;
     this.room.game_state.count = count;
+    if (this.room.game_state.twoPlayerMode) this.room.game_state.phase = 'guess';
+    this.inputs.clueWord.value = '';
+    this.inputs.clueCount.value = '';
     this.saveState();
-
     this.socket.emit('clue_sent', { clue, count });
+    this.renderBoard();
     this.updateGameState(this.room.game_state);
   }
 
@@ -468,6 +501,7 @@ class JuegoCodigoSecreto {
     this.room.game_state.turn = this.room.game_state.turn === 'red' ? 'blue' : 'red';
     this.room.game_state.clue = null;
     this.room.game_state.count = 0;
+    this.room.game_state.phase = 'clue';
   }
 
   async saveState() {
@@ -503,6 +537,8 @@ class JuegoCodigoSecreto {
     if (this.room && this.room.game_state) {
       this.room.game_state.clue = clue;
       this.room.game_state.count = count;
+      if (this.room.game_state.twoPlayerMode) this.room.game_state.phase = 'guess';
+      this.renderBoard();
       this.updateGameState(this.room.game_state);
     }
   }
@@ -512,6 +548,8 @@ class JuegoCodigoSecreto {
       this.room.game_state.turn = newTurn;
       this.room.game_state.clue = null;
       this.room.game_state.count = 0;
+      this.room.game_state.phase = 'clue';
+      this.renderBoard();
       this.updateGameState(this.room.game_state);
     }
   }
