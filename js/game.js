@@ -255,6 +255,17 @@ class JuegoCodigoSecreto {
       this.startGame();
     });
 
+    this.socket.on('game_over', (data) => {
+      this.endGame(data.result, false); // false → no re-emitir
+    });
+
+    this.socket.on('new_room', (data) => {
+      document.getElementById('modal-result').classList.add('hidden');
+      this._myTeam = null;
+      this.isHost = false;
+      this.handleJoinRoom(data.roomCode);
+    });
+
     this.socket.on('word_reveal', (data) => {
       this.revealWordLocal(data.index, data.wordType);
       this.updateGameState(data.newState);
@@ -269,6 +280,7 @@ class JuegoCodigoSecreto {
         this.switchPhaseToClue();
         this.renderBoard();
         this.updateGameState(this.room.game_state);
+        this.startTimer();
       } else {
         this.switchTurnLocal(data.newTurn);
       }
@@ -300,22 +312,25 @@ class JuegoCodigoSecreto {
   }
 
   async handleStartGame() {
-    const grid = this.generateGrid();
+    const cardCountEl = document.querySelector('input[name="card-count"]:checked');
+    const cardCount = parseInt(cardCountEl?.value ?? '25');
     const firstTurnEl = document.querySelector('input[name="first-turn"]:checked');
     const picked = firstTurnEl?.value ?? 'random';
     const firstTurn = picked === 'random' ? (Math.random() > 0.5 ? 'red' : 'blue') : picked;
-    const timePerTurn = parseInt(document.getElementById('config-time')?.value) || 90;
-    this.assignTypes(grid, firstTurn);
-
+    const rawTime = parseInt(document.getElementById('config-time')?.value);
+    const timePerTurn = (!isNaN(rawTime) && rawTime >= 30) ? Math.min(rawTime, 180) : 0;
     const twoPlayerMode = document.getElementById('config-2player')?.checked || false;
-    let spymasterId = null, playerRoles = null;
     const players = this.room.players || this.room.participants || [];
+
+    const grid = this.generateGrid(cardCount);
+    let spymasterId = null, playerRoles = null;
 
     if (twoPlayerMode) {
       const other = players.find(p => p.user_id !== this.user.id);
       spymasterId = Math.random() > 0.5 ? this.user.id : (other?.user_id || this.user.id);
       this.assignTypes2P(grid);
     } else {
+      this.assignTypes(grid, firstTurn);
       // Equipos y roles aleatorios
       const shuffled = [...players].sort(() => Math.random() - 0.5);
       const mid = Math.ceil(shuffled.length / 2);
@@ -355,35 +370,34 @@ class JuegoCodigoSecreto {
     this.startGame();
   }
 
-  generateGrid() {
+  generateGrid(count = 25) {
     const shuffled = [...PALABRAS].sort(() => 0.5 - Math.random());
-    return shuffled.slice(0, 25).map(word => ({
-      word,
-      type: 'civil',
-      revealed: false
-    }));
+    return shuffled.slice(0, count).map(word => ({ word, type: 'civil', revealed: false }));
   }
 
   assignTypes2P(grid) {
-    // Cooperativo: 9 palabras objetivo (red) + 15 civiles + 1 asesino
+    const total = grid.length;
+    const targetCount = Math.ceil(total * 9 / 25);
     const types = [
-      ...Array(9).fill('red'),
-      ...Array(15).fill('civil'),
+      ...Array(targetCount).fill('red'),
+      ...Array(total - targetCount - 1).fill('civil'),
       'assassin'
     ].sort(() => Math.random() - 0.5);
     grid.forEach((cell, i) => cell.type = types[i]);
   }
 
   assignTypes(grid, firstTurn) {
-    const types = [];
-    const secondTurn = firstTurn === 'red' ? 'blue' : 'red';
-    for (let i = 0; i < 9; i++) types.push(firstTurn);
-    for (let i = 0; i < 8; i++) types.push(secondTurn);
-    for (let i = 0; i < 7; i++) types.push('civil');
-    types.push('assassin');
-
-    const shuffledTypes = types.sort(() => 0.5 - Math.random());
-    grid.forEach((cell, i) => cell.type = shuffledTypes[i]);
+    const total = grid.length;
+    const second = firstTurn === 'red' ? 'blue' : 'red';
+    const firstCount = Math.ceil(total * 9 / 25);
+    const secondCount = Math.floor(total * 8 / 25);
+    const types = [
+      ...Array(firstCount).fill(firstTurn),
+      ...Array(secondCount).fill(second),
+      ...Array(total - firstCount - secondCount - 1).fill('civil'),
+      'assassin'
+    ].sort(() => Math.random() - 0.5);
+    grid.forEach((cell, i) => cell.type = types[i]);
   }
 
   startGame() {
@@ -397,12 +411,15 @@ class JuegoCodigoSecreto {
     this.showScreen('game');
     this.renderBoard();
     this.updateGameState(state);
+    this.startTimer();
   }
 
   get myTeam() { return this._myTeam || (this.isHost ? 'red' : 'blue'); }
 
   renderBoard() {
     const state = this.room.game_state;
+    const cols = state.grid.length === 16 ? 4 : 5;
+    this.displays.board.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
     this.displays.board.innerHTML = '';
     state.grid.forEach((cell, i) => {
       const btn = document.createElement('button');
@@ -428,16 +445,16 @@ class JuegoCodigoSecreto {
       red:      'bg-red-600 text-white border-red-400',
       blue:     'bg-blue-600 text-white border-blue-400',
       civil:    'bg-yellow-100 text-gray-800 border-yellow-200',
-      assassin: 'bg-black text-red-400 border-red-600',
+      assassin: 'bg-purple-900 text-purple-200 border-purple-400',
     };
     if (type === 'assassin') el.textContent = '☠ ' + el.textContent.replace('☠ ', '');
     if (asHint) {
-      el.classList.add('opacity-60', 'border-dashed');
-      el.classList.add(...colors[type].split(' '));
+      // El asesino NO lleva opacidad reducida — tiene que verse con claridad
+      if (type !== 'assassin') el.classList.add('opacity-50');
+      el.classList.add('border-dashed', ...colors[type].split(' '));
     } else if (revealed) {
       el.classList.remove('bg-gray-800', 'text-white');
-      el.classList.add(...colors[type].split(' '));
-      el.classList.add('scale-95', 'opacity-90');
+      el.classList.add(...colors[type].split(' '), 'scale-95', 'opacity-90');
       el.disabled = true;
     }
   }
@@ -465,7 +482,9 @@ class JuegoCodigoSecreto {
       const phaseText = state.phase === 'clue' ? 'ESPÍA · Dando pista' : 'AGENTE · Adivinando';
       document.getElementById('turn-indicator-2p').textContent = phaseText;
       const found = state.grid.filter(c => c.type === 'red' && c.revealed).length;
+      const total2p = state.grid.filter(c => c.type === 'red').length;
       document.getElementById('score-2p').textContent = found;
+      document.getElementById('score-2p-total').textContent = '/' + total2p;
     } else {
       const isMyTurn = state.turn === this.myTeam;
       const isGuia = this.role === 'guia';
@@ -474,8 +493,12 @@ class JuegoCodigoSecreto {
 
       document.getElementById('hud-teams').classList.remove('hidden');
       document.getElementById('hud-2p').classList.add('hidden');
+      const redTotal = state.grid.filter(c => c.type === 'red').length;
+      const blueTotal = state.grid.filter(c => c.type === 'blue').length;
       this.displays.scoreRed.textContent = state.grid.filter(c => c.type === 'red' && c.revealed).length;
       this.displays.scoreBlue.textContent = state.grid.filter(c => c.type === 'blue' && c.revealed).length;
+      document.getElementById('score-red-total').textContent = '/' + redTotal;
+      document.getElementById('score-blue-total').textContent = '/' + blueTotal;
       this.displays.turnIndicator.textContent = state.turn.toUpperCase();
       this.displays.turnIndicator.className = `px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border ${state.turn === 'red' ? 'border-red-500 bg-red-900/30 text-red-400' : 'border-blue-500 bg-blue-900/30 text-blue-400'}`;
       const roleBadge = document.getElementById('my-role-display');
@@ -514,8 +537,6 @@ class JuegoCodigoSecreto {
     if (state.twoPlayerMode) {
       if (cell.type === 'assassin') {
         this.endGame('lose');
-      } else if (cell.type === 'civil') {
-        this.switchPhaseToClue();
       } else {
         state.guessesLeft = (state.guessesLeft ?? 1) - 1;
         if (state.guessesLeft <= 0) this.switchPhaseToClue();
@@ -523,8 +544,6 @@ class JuegoCodigoSecreto {
     } else {
       if (cell.type === 'assassin') {
         this.endGame(state.turn === 'red' ? 'blue' : 'red');
-      } else if (cell.type !== state.turn) {
-        this.switchTurn();
       } else {
         state.guessesLeft = (state.guessesLeft ?? 1) - 1;
         if (state.guessesLeft <= 0) this.switchTurn();
@@ -559,6 +578,7 @@ class JuegoCodigoSecreto {
     this.socket.emit('clue_sent', { clue, count });
     this.renderBoard();
     this.updateGameState(this.room.game_state);
+    this.startTimer();
   }
 
   handleEndTurn() {
@@ -605,7 +625,7 @@ class JuegoCodigoSecreto {
     }
   }
 
-  endGame(result) {
+  endGame(result, broadcast = true) {
     const configs = {
       win:  { icon: '🎉', title: '¡VICTORIA!',      sub: 'Habéis encontrado todas las palabras.', cls: 'text-green-400' },
       lose: { icon: '💀', title: '¡GAME OVER!',     sub: 'El asesino ha sido descubierto.',       cls: 'text-red-500'   },
@@ -618,6 +638,38 @@ class JuegoCodigoSecreto {
     document.getElementById('winner-title').className = `text-3xl font-black mb-2 ${c.cls}`;
     document.getElementById('winner-subtitle').textContent = c.sub;
     this.displays.modalResult.classList.remove('hidden');
+
+    this.stopTimer();
+    if (broadcast) {
+      this.socket.emit('game_over', { result });
+      this.api.updateRoomState(this.roomCode, { status: 'finished' }).catch(() => {});
+    }
+
+    const btn = document.getElementById('btn-back-lobby-modal');
+    if (this.isHost) {
+      btn.textContent = 'Nueva partida';
+      btn.disabled = false;
+      btn.classList.remove('opacity-50', 'cursor-not-allowed');
+      btn.onclick = () => this.handleNewGame();
+    } else {
+      btn.textContent = 'Esperando nueva partida…';
+      btn.disabled = true;
+      btn.classList.add('opacity-50', 'cursor-not-allowed');
+    }
+  }
+
+  async handleNewGame() {
+    document.getElementById('modal-result').classList.add('hidden');
+    try {
+      const room = await this.api.createRoom(16, this.user.id, { difficulty: 'normal' }, { status: 'waiting' });
+      this.isHost = true;
+      this._myTeam = null;
+      this.socket.emit('new_room', { roomCode: room.room_code });
+      // Pequeño delay para que el emit salga antes de cerrar el socket
+      setTimeout(() => this.enterRoom(room.room_code), 150);
+    } catch (err) {
+      alert('Error al crear sala: ' + err.message);
+    }
   }
 
   revealWordLocal(index, wordType) {
@@ -635,6 +687,7 @@ class JuegoCodigoSecreto {
       if (this.room.game_state.twoPlayerMode) this.room.game_state.phase = 'guess';
       this.renderBoard();
       this.updateGameState(this.room.game_state);
+      this.startTimer();
     }
   }
 
@@ -646,12 +699,63 @@ class JuegoCodigoSecreto {
       this.room.game_state.phase = 'clue';
       this.renderBoard();
       this.updateGameState(this.room.game_state);
+      this.startTimer();
     }
+  }
+
+  startTimer() {
+    this.stopTimer();
+    const time = this.room?.game_state?.timePerTurn;
+    if (!time || time <= 0) return;
+    let remaining = time;
+    this._updateTimerEl(remaining);
+    this._timer = setInterval(() => {
+      remaining--;
+      this._updateTimerEl(remaining);
+      if (remaining <= 0) {
+        this.stopTimer();
+        this._onTimerExpired();
+      }
+    }, 1000);
+  }
+
+  stopTimer() {
+    clearInterval(this._timer);
+    this._timer = null;
+    document.getElementById('timer-display')?.classList.add('hidden');
+  }
+
+  _updateTimerEl(s) {
+    const wrap = document.getElementById('timer-display');
+    const val  = document.getElementById('timer-value');
+    if (!wrap || !val) return;
+    wrap.classList.remove('hidden');
+    val.textContent = s;
+    const low = s <= 10;
+    wrap.className = `flex items-center justify-center gap-2 rounded-xl px-4 py-2 border ${low ? 'bg-red-950/50 border-red-600' : 'bg-gray-900 border-gray-700'}`;
+    val.className   = `font-black text-3xl tabular-nums ${low ? 'text-red-400' : 'text-white'}`;
+  }
+
+  _onTimerExpired() {
+    if (this.displays.modalResult && !this.displays.modalResult.classList.contains('hidden')) return;
+    const state = this.room.game_state;
+    if (state.twoPlayerMode) {
+      this.switchPhaseToClue();
+      this.socket.emit('turn_switch', { phase: 'clue' });
+    } else {
+      this.switchTurn();
+      this.socket.emit('turn_switch', { newTurn: state.turn });
+    }
+    this.saveState().catch(() => {});
+    this.renderBoard();
+    this.updateGameState(this.room.game_state);
+    this.startTimer();
   }
 
   showScreen(screenId) {
     Object.values(this.screens).forEach(s => s.classList.remove('active'));
     this.screens[screenId].classList.add('active');
+    if (screenId !== 'game') this.stopTimer();
   }
 }
 

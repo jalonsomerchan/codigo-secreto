@@ -165,9 +165,28 @@
         </label>
         <hr class="border-gray-800" />
 
+        <!-- Número de tarjetas -->
+        <div>
+          <p class="text-xs text-gray-400 mb-2">Número de tarjetas</p>
+          <div class="flex gap-2">
+            <label class="flex-1">
+              <input type="radio" name="card-count" value="16" class="sr-only peer" />
+              <div class="peer-checked:bg-brand peer-checked:border-brand-light bg-gray-800 border border-gray-700 rounded-xl py-2 text-center text-xs font-bold cursor-pointer transition text-gray-400 peer-checked:text-white">4×4</div>
+            </label>
+            <label class="flex-1">
+              <input type="radio" name="card-count" value="20" class="sr-only peer" />
+              <div class="peer-checked:bg-brand peer-checked:border-brand-light bg-gray-800 border border-gray-700 rounded-xl py-2 text-center text-xs font-bold cursor-pointer transition text-gray-400 peer-checked:text-white">4×5</div>
+            </label>
+            <label class="flex-1">
+              <input type="radio" name="card-count" value="25" class="sr-only peer" checked />
+              <div class="peer-checked:bg-brand peer-checked:border-brand-light bg-gray-800 border border-gray-700 rounded-xl py-2 text-center text-xs font-bold cursor-pointer transition text-gray-400 peer-checked:text-white">5×5</div>
+            </label>
+          </div>
+        </div>
+
         <!-- Primer turno -->
         <div>
-          <p class="text-xs text-gray-400 mb-2">Equipo que empieza (9 palabras)</p>
+          <p class="text-xs text-gray-400 mb-2">Equipo que empieza</p>
           <div class="flex gap-2">
             <label class="flex-1">
               <input type="radio" name="first-turn" value="red" class="sr-only peer" checked />
@@ -192,15 +211,16 @@
 
         <!-- Tiempo por turno -->
         <div>
-          <p class="text-xs text-gray-400 mb-2">Tiempo por turno (segundos)</p>
+          <p class="text-xs text-gray-400 mb-2">Tiempo por turno</p>
           <div class="flex gap-2">
-            <input id="config-time" type="number" min="30" max="300" value="90"
-              class="w-24 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-center focus:outline-none focus:border-brand" />
-            <div class="flex gap-1">
-              <button onclick="document.getElementById('config-time').value=60" class="bg-gray-700 hover:bg-gray-600 text-xs px-3 py-2 rounded-lg transition">60s</button>
-              <button onclick="document.getElementById('config-time').value=90" class="bg-gray-700 hover:bg-gray-600 text-xs px-3 py-2 rounded-lg transition">90s</button>
-              <button onclick="document.getElementById('config-time').value=120" class="bg-gray-700 hover:bg-gray-600 text-xs px-3 py-2 rounded-lg transition">2min</button>
-              <button onclick="document.getElementById('config-time').value=0" class="bg-gray-700 hover:bg-gray-600 text-xs px-3 py-2 rounded-lg transition">∞</button>
+            <input id="config-time" type="number" min="30" max="180" value="90"
+              class="w-20 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-center focus:outline-none focus:border-brand" />
+            <div class="flex gap-1 flex-wrap">
+              <button onclick="document.getElementById('config-time').value=30" class="bg-gray-700 hover:bg-gray-600 text-xs px-2 py-2 rounded-lg transition">30s</button>
+              <button onclick="document.getElementById('config-time').value=60" class="bg-gray-700 hover:bg-gray-600 text-xs px-2 py-2 rounded-lg transition">60s</button>
+              <button onclick="document.getElementById('config-time').value=90" class="bg-gray-700 hover:bg-gray-600 text-xs px-2 py-2 rounded-lg transition">90s</button>
+              <button onclick="document.getElementById('config-time').value=180" class="bg-gray-700 hover:bg-gray-600 text-xs px-2 py-2 rounded-lg transition">3min</button>
+              <button onclick="document.getElementById('config-time').value=0" class="bg-gray-700 hover:bg-gray-600 text-xs px-2 py-2 rounded-lg transition">∞</button>
             </div>
           </div>
         </div>
@@ -228,11 +248,11 @@
       <div class="flex items-center gap-2 bg-red-950/60 border border-red-800 rounded-xl px-3 py-2 flex-1">
         <div class="w-3 h-3 rounded-full bg-red-500 shrink-0"></div>
         <span class="text-red-400 font-black text-lg" id="score-red">0</span>
-        <span class="text-red-700 text-xs">/9</span>
+        <span class="text-red-700 text-xs" id="score-red-total">/9</span>
       </div>
       <div id="turn-indicator" class="px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border border-gray-700 bg-gray-900 text-gray-400 shrink-0">TURNO ---</div>
       <div class="flex items-center gap-2 bg-blue-950/60 border border-blue-800 rounded-xl px-3 py-2 flex-1 justify-end">
-        <span class="text-blue-700 text-xs">/8</span>
+        <span class="text-blue-700 text-xs" id="score-blue-total">/8</span>
         <span class="text-blue-400 font-black text-lg" id="score-blue">0</span>
         <div class="w-3 h-3 rounded-full bg-blue-500 shrink-0"></div>
       </div>
@@ -243,12 +263,19 @@
       <div id="turn-indicator-2p" class="flex-1 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-widest border border-gray-700 bg-gray-900 text-gray-400 text-center">---</div>
       <div class="flex items-center gap-1 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2">
         <span class="text-green-400 font-black text-lg" id="score-2p">0</span>
-        <span class="text-gray-600 text-xs">/9</span>
+        <span class="text-gray-600 text-xs" id="score-2p-total">/9</span>
       </div>
     </div>
 
     <!-- Badge de rol del jugador -->
     <div id="my-role-display" class="hidden text-center text-xs font-bold px-2 py-1 rounded-lg"></div>
+
+    <!-- Temporizador -->
+    <div id="timer-display" class="hidden flex items-center justify-center gap-2 bg-gray-900 border border-gray-700 rounded-xl px-4 py-2">
+      <span class="text-gray-500 text-lg">⏱</span>
+      <span id="timer-value" class="font-black text-3xl tabular-nums text-white">90</span>
+      <span class="text-gray-500 text-xs">s</span>
+    </div>
 
     <!-- Pista activa -->
     <div id="clue-display" class="hidden bg-gray-900 border border-gray-700 rounded-xl px-4 py-2 flex items-center gap-3">
@@ -380,11 +407,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     const src = document.getElementById('display-username');
     if (src) obs.observe(src, { childList: true, characterData: true, subtree: true });
-    // Modal result
-    document.getElementById('btn-back-lobby-modal').onclick = () => {
-      document.getElementById('modal-result').classList.add('hidden');
-      window.game && window.game.showScreen('lobby');
-    };
+    // El onclick del modal-result lo gestiona endGame() dinámicamente
     // Modal reglas
     document.getElementById('btn-rules').onclick = () => document.getElementById('modal-rules').classList.remove('hidden');
     document.getElementById('btn-close-rules').onclick = () => document.getElementById('modal-rules').classList.add('hidden');
